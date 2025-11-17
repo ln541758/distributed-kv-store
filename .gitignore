@@ -1,0 +1,41 @@
+# Go binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+server
+*.test
+*.out
+
+# Go build cache
+go.work
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+/tmp/
+
+# Visualizations (generated files - too large for git)
+visualizations/*.png
+

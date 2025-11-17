@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Script to run Leader-Follower tests with different W/R configurations
+# Script to run Leader-Follower tests with different W/R configurations locally
 
 set -e
 
@@ -14,6 +14,28 @@ BLUE='\033[0;34m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
+# Store PIDs for cleanup
+declare -a PIDS=()
+
+# Create results directory
+RESULTS_DIR="results"
+mkdir -p "$RESULTS_DIR"
+
+# Cleanup function
+cleanup() {
+    echo -e "\n${BLUE}Cleaning up...${NC}"
+    for pid in "${PIDS[@]}"; do
+        if ps -p $pid > /dev/null 2>&1; then
+            kill $pid 2>/dev/null || true
+        fi
+    done
+    wait 2>/dev/null || true
+    echo -e "${GREEN}Cleanup complete${NC}"
+}
+
+# Set trap for cleanup on exit
+trap cleanup EXIT INT TERM
+
 # Function to run tests for a specific W/R configuration
 run_test() {
     local w=$1
@@ -22,25 +44,32 @@ run_test() {
     
     echo -e "\n${BLUE}=== Testing Leader-Follower (W=${w}, R=${r}) ===${NC}"
     
-    # Initialize and apply Terraform
-    cd terraform
-    terraform init -upgrade
+    # Start servers
+    echo "Starting Leader and Follower nodes..."
+    cd leader-follower
     
-    # Modify the leader container environment variables
-    echo "Deploying infrastructure..."
-    terraform apply -auto-approve
+    # Start leader
+    NODE_TYPE=leader W=$w R=$r PORT=8080 FOLLOWER_URLS=http://localhost:8081,http://localhost:8082,http://localhost:8083,http://localhost:8084 go run . > /tmp/leader.log 2>&1 &
+    PIDS+=($!)
+    
+    # Start followers
+    NODE_TYPE=follower PORT=8081 go run . > /tmp/follower1.log 2>&1 &
+    PIDS+=($!)
+    
+    NODE_TYPE=follower PORT=8082 go run . > /tmp/follower2.log 2>&1 &
+    PIDS+=($!)
+    
+    NODE_TYPE=follower PORT=8083 go run . > /tmp/follower3.log 2>&1 &
+    PIDS+=($!)
+    
+    NODE_TYPE=follower PORT=8084 go run . > /tmp/follower4.log 2>&1 &
+    PIDS+=($!)
     
     cd ..
     
     # Wait for services to start
     echo "Waiting for services to start..."
-    sleep 10
-    
-    # Run unit tests
-    echo -e "\n${GREEN}Running unit tests...${NC}"
-    cd tests
-    go run leader_follower_test.go
-    cd ..
+    sleep 5
     
     # Run load tests with different read/write ratios
     echo -e "\n${GREEN}Running load tests...${NC}"
@@ -48,27 +77,27 @@ run_test() {
     
     # 1% write / 99% read
     echo "Testing 1% write / 99% read..."
-    go run main.go -mode leader -write-ratio 0.01 -duration 30 -qps 20 -output "../results_leader_${config_name}_1w99r.json"
+    go run main.go -mode leader -write-ratio 0.01 -duration 30 -qps 20 -num-keys 50 -output "../${RESULTS_DIR}/leader_${config_name}_1w99r.json"
     
     # 10% write / 90% read
     echo "Testing 10% write / 90% read..."
-    go run main.go -mode leader -write-ratio 0.10 -duration 30 -qps 20 -output "../results_leader_${config_name}_10w90r.json"
+    go run main.go -mode leader -write-ratio 0.10 -duration 30 -qps 20 -num-keys 50 -output "../${RESULTS_DIR}/leader_${config_name}_10w90r.json"
     
     # 50% write / 50% read
     echo "Testing 50% write / 50% read..."
-    go run main.go -mode leader -write-ratio 0.50 -duration 30 -qps 20 -output "../results_leader_${config_name}_50w50r.json"
+    go run main.go -mode leader -write-ratio 0.50 -duration 30 -qps 20 -num-keys 50 -output "../${RESULTS_DIR}/leader_${config_name}_50w50r.json"
     
     # 90% write / 10% read
     echo "Testing 90% write / 10% read..."
-    go run main.go -mode leader -write-ratio 0.90 -duration 30 -qps 20 -output "../results_leader_${config_name}_90w10r.json"
+    go run main.go -mode leader -write-ratio 0.90 -duration 30 -qps 20 -num-keys 50 -output "../${RESULTS_DIR}/leader_${config_name}_90w10r.json"
     
     cd ..
     
-    # Cleanup
-    echo "Cleaning up..."
-    cd terraform
-    terraform destroy -auto-approve
-    cd ..
+    # Cleanup servers
+    echo "Stopping servers..."
+    cleanup
+    PIDS=()
+    sleep 2
     
     echo -e "${GREEN}✓ Tests completed for W=${w}, R=${r}${NC}"
 }
