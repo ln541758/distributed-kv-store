@@ -47,6 +47,7 @@ func (s *Server) handleSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Perform write operation
 	statusCode, version, err := s.node.Write(req.Key, req.Value)
 	if err != nil {
 		http.Error(w, err.Error(), statusCode)
