@@ -39,7 +39,7 @@ A distributed key-value database implementation in Go with Leader-Follower and L
 
 ## Prerequisites
 
-- Go 1.21 or higher
+- Go 1.25 or higher
 - Docker
 - Terraform 1.0 or higher
 

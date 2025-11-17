@@ -205,7 +205,7 @@ func (ln *LeaderNode) Read(key string) (int, string, int, error) {
 
 // readFromFollower reads from a follower node
 func (ln *LeaderNode) readFromFollower(followerURL, key string) (KVPair, error) {
-	resp, err := http.Get(followerURL + "/local_read/" + key)
+	resp, err := http.Get(followerURL + "/get/" + key)
 	if err != nil {
 		return KVPair{}, err
 	}
@@ -225,6 +225,15 @@ func (ln *LeaderNode) readFromFollower(followerURL, key string) (KVPair, error) 
 	}
 
 	return KVPair{Value: result.Value, Version: result.Version}, nil
+}
+
+// LocalRead performs a local read (for testing)
+func (ln *LeaderNode) LocalRead(key string) (int, string, int, error) {
+	pair, exists := ln.kvStore.Get(key)
+	if !exists {
+		return 404, "", 0, fmt.Errorf("key not found")
+	}
+	return 200, pair.Value, pair.Version, nil
 }
 
 // FollowerNode represents a follower in the Leader-Follower architecture

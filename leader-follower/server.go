@@ -33,6 +33,7 @@ func (s *Server) Start() error {
 	r.HandleFunc("/set", s.handleSet).Methods("POST")
 	r.HandleFunc("/get/{key}", s.handleGet).Methods("GET")
 	r.HandleFunc("/replicate", s.handleReplicate).Methods("POST")
+	r.HandleFunc("/local_read/{key}", s.handleLocalRead).Methods("GET")
 	r.HandleFunc("/health", s.handleHealth).Methods("GET")
 
 	return http.ListenAndServe(":"+s.port, r)
@@ -124,6 +125,35 @@ func (s *Server) handleReplicate(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(statusCode)
 	json.NewEncoder(w).Encode(map[string]string{
 		"status": "replicated",
+	})
+}
+
+// handleLocalRead handles local read requests (for testing)
+func (s *Server) handleLocalRead(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	key := vars["key"]
+
+	var statusCode int
+	var value string
+	var version int
+	var err error
+
+	if s.nodeType == "leader" {
+		statusCode, value, version, err = s.leader.LocalRead(key)
+	} else {
+		statusCode, value, version, err = s.follower.LocalRead(key)
+	}
+
+	if err != nil {
+		http.Error(w, err.Error(), statusCode)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"value":   value,
+		"version": version,
 	})
 }
 
