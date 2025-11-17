@@ -402,7 +402,49 @@ func max(data []float64) float64 {
 
 func minFloat(data []float64) float64 {
 	if len(data) == 0 {
+<<<<<<< HEAD
 		return 0.0
+=======
+		return 0
+	}
+	minVal := data[0]
+	for _, v := range data {
+		if v < minVal {
+			minVal = v
+		}
+	}
+	return minVal
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func min(nums ...interface{}) interface{} {
+	switch v := nums[0].(type) {
+	case int:
+		minVal := v
+		for _, num := range nums[1:] {
+			if n, ok := num.(int); ok && n < minVal {
+				minVal = n
+			}
+		}
+		return minVal
+	case []float64:
+		if len(v) == 0 {
+			return 0.0
+		}
+		minVal := v[0]
+		for _, num := range v {
+			if num < minVal {
+				minVal = num
+			}
+		}
+		return minVal
+>>>>>>> 4177218 (Update leaderless)
 	}
 	minVal := data[0]
 	for _, v := range data {
