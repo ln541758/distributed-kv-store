@@ -37,9 +37,11 @@ func (kv *KVStore) Set(key, value string, version *int) int {
 
 	var v int
 	if version == nil {
+		// Leader writes: increment version
 		kv.versionCounter++
 		v = kv.versionCounter
 	} else {
+		// Follower replication: use provided version from leader
 		v = *version
 		if v > kv.versionCounter {
 			kv.versionCounter = v
@@ -223,15 +225,6 @@ func (ln *LeaderNode) readFromFollower(followerURL, key string) (KVPair, error) 
 	}
 
 	return KVPair{Value: result.Value, Version: result.Version}, nil
-}
-
-// LocalRead performs a local read (for testing)
-func (ln *LeaderNode) LocalRead(key string) (int, string, int, error) {
-	pair, exists := ln.kvStore.Get(key)
-	if !exists {
-		return 404, "", 0, fmt.Errorf("key not found")
-	}
-	return 200, pair.Value, pair.Version, nil
 }
 
 // FollowerNode represents a follower in the Leader-Follower architecture
