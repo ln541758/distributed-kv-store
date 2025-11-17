@@ -143,13 +143,100 @@ func (ln *LeaderlessNode) replicateToPeer(peerURL, key, value string, version in
 	return nil
 }
 
-// Read performs a read operation (R=1: only read from local)
+// Read performs a read operation with quorum support
 func (ln *LeaderlessNode) Read(key string) (int, string, int, error) {
-	pair, exists := ln.kvStore.Get(key)
-	if !exists {
+	// R=1: Fast path - only read from local
+	if ln.r == 1 {
+		pair, exists := ln.kvStore.Get(key)
+		if !exists {
+			return 404, "", 0, fmt.Errorf("key not found")
+		}
+		return 200, pair.Value, pair.Version, nil
+	}
+
+	// R>1: Read from multiple nodes and return latest version
+	type readResult struct {
+		pair  KVPair
+		found bool
+		err   error
+	}
+
+	results := make(chan readResult, len(ln.peerURLs)+1)
+
+	// Read from local node
+	go func() {
+		pair, exists := ln.kvStore.Get(key)
+		results <- readResult{pair: pair, found: exists, err: nil}
+	}()
+
+	// Read from peer nodes in parallel
+	for _, peerURL := range ln.peerURLs {
+		peerURL := peerURL // capture for goroutine
+		go func() {
+			pair, err := ln.readFromPeer(peerURL, key)
+			if err != nil {
+				results <- readResult{found: false, err: err}
+			} else {
+				results <- readResult{pair: pair, found: true, err: nil}
+			}
+		}()
+	}
+
+	// Collect R responses
+	var validPairs []KVPair
+	nodesRead := 0
+	totalNodes := len(ln.peerURLs) + 1
+
+	for i := 0; i < totalNodes && nodesRead < ln.r; i++ {
+		result := <-results
+		if result.found {
+			validPairs = append(validPairs, result.pair)
+			nodesRead++
+		}
+	}
+
+	// Check if R requirement is met
+	if nodesRead < ln.r {
+		return 500, "", 0, fmt.Errorf("failed to meet read quorum: got %d/%d", nodesRead, ln.r)
+	}
+
+	// Return the value with highest version (Last-Write-Wins)
+	if len(validPairs) == 0 {
 		return 404, "", 0, fmt.Errorf("key not found")
 	}
-	return 200, pair.Value, pair.Version, nil
+
+	latest := validPairs[0]
+	for _, pair := range validPairs[1:] {
+		if pair.Version > latest.Version {
+			latest = pair
+		}
+	}
+
+	return 200, latest.Value, latest.Version, nil
+}
+
+// readFromPeer reads a key from a peer node
+func (ln *LeaderlessNode) readFromPeer(peerURL, key string) (KVPair, error) {
+	resp, err := http.Get(peerURL + "/local_read/" + key)
+	if err != nil {
+		return KVPair{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return KVPair{}, fmt.Errorf("read failed with status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Value   string `json:"value"`
+		Version int    `json:"version"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return KVPair{}, err
+	}
+
+	return KVPair{Value: result.Value, Version: result.Version}, nil
 }
 
 // Replicate handles replication request from another node

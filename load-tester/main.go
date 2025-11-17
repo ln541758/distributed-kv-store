@@ -263,7 +263,7 @@ func (lt *LoadTester) PrintStatistics() {
 
 	if len(lt.staleReads) > 0 {
 		fmt.Println("  Examples:")
-		for i := 0; i < min(3, len(lt.staleReads)); i++ {
+		for i := 0; i < minInt(3, len(lt.staleReads)); i++ {
 			sr := lt.staleReads[i]
 			fmt.Printf("    - Key: %s, Expected: v%d, Actual: v%d, Time since write: %.2fms\n",
 				sr.Key, sr.ExpectedVersion, sr.ActualVersion, sr.TimeSinceWrite*1000)
@@ -276,7 +276,7 @@ func (lt *LoadTester) PrintStatistics() {
 		fmt.Printf("\nRead-Write Intervals (%d total):\n", len(lt.readWriteIntervals))
 		fmt.Printf("  Average interval: %.2fms\n", mean(lt.readWriteIntervals)*1000)
 		fmt.Printf("  Median interval: %.2fms\n", median(lt.readWriteIntervals)*1000)
-		fmt.Printf("  Min interval: %.2fms\n", min(lt.readWriteIntervals)*1000)
+		fmt.Printf("  Min interval: %.2fms\n", minFloat(lt.readWriteIntervals)*1000)
 		fmt.Printf("  Max interval: %.2fms\n", max(lt.readWriteIntervals)*1000)
 	}
 }
@@ -361,6 +361,26 @@ func max(data []float64) float64 {
 		}
 	}
 	return maxVal
+}
+
+func minFloat(data []float64) float64 {
+	if len(data) == 0 {
+		return 0
+	}
+	minVal := data[0]
+	for _, v := range data {
+		if v < minVal {
+			minVal = v
+		}
+	}
+	return minVal
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func min(nums ...interface{}) interface{} {
