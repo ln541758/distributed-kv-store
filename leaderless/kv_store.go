@@ -37,9 +37,11 @@ func (kv *KVStore) Set(key, value string, version *int) int {
 
 	var v int
 	if version == nil {
+		// Leader writes: increment version
 		kv.versionCounter++
 		v = kv.versionCounter
 	} else {
+		// Follower replication: use provided version from leader
 		v = *version
 		if v > kv.versionCounter {
 			kv.versionCounter = v
