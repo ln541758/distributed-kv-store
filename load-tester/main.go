@@ -17,16 +17,16 @@ import (
 
 // LoadTester manages load testing operations
 type LoadTester struct {
-	mode              string
-	urls              []string
-	numKeys           int
-	writeLatencies    []float64
-	readLatencies     []float64
-	staleReads        []StaleRead
+	mode               string
+	urls               []string
+	numKeys            int
+	writeLatencies     []float64
+	readLatencies      []float64
+	staleReads         []StaleRead
 	readWriteIntervals []float64
-	versions          map[string]VersionInfo
-	keyAccessTimes    map[string][]AccessInfo
-	mu                sync.Mutex
+	versions           map[string]VersionInfo
+	keyAccessTimes     map[string][]AccessInfo
+	mu                 sync.Mutex
 }
 
 // VersionInfo tracks version and timestamp for a key
@@ -107,7 +107,12 @@ func (lt *LoadTester) WriteOperation(key, value string) (float64, bool) {
 
 // ReadOperation performs a read operation
 func (lt *LoadTester) ReadOperation(key string) (float64, bool) {
-	url := lt.urls[rand.Intn(len(lt.urls))]
+	// Leader-Follower: ALL reads go to leader (who coordinates with R nodes)
+	// Leaderless: Reads go to any random node (local read only)
+	url := lt.urls[0]
+	if lt.mode == "leaderless" {
+		url = lt.urls[rand.Intn(len(lt.urls))]
+	}
 
 	start := time.Now()
 	resp, err := http.Get(url + "/get/" + key)
@@ -118,6 +123,12 @@ func (lt *LoadTester) ReadOperation(key string) (float64, bool) {
 	}
 	defer resp.Body.Close()
 
+	// Check for staleness before processing response
+	isStale := false
+	lt.mu.Lock()
+	vInfo, keyExists := lt.versions[key]
+	lt.mu.Unlock()
+
 	if resp.StatusCode == 200 {
 		var result struct {
 			Value   string `json:"value"`
@@ -125,10 +136,9 @@ func (lt *LoadTester) ReadOperation(key string) (float64, bool) {
 		}
 		json.NewDecoder(resp.Body).Decode(&result)
 
-		// Check for staleness
-		isStale := false
+		// Check if version is stale
 		lt.mu.Lock()
-		if vInfo, exists := lt.versions[key]; exists {
+		if keyExists {
 			if result.Version < vInfo.Version {
 				isStale = true
 				lt.staleReads = append(lt.staleReads, StaleRead{
@@ -148,7 +158,25 @@ func (lt *LoadTester) ReadOperation(key string) (float64, bool) {
 		return latency, isStale
 	}
 
-	return latency, false
+	// If we get 404 but we know the key should exist (we just wrote it),
+	// this is a stale read - the node hasn't received replication yet
+	if resp.StatusCode == 404 && keyExists {
+		isStale = true
+		lt.mu.Lock()
+		lt.staleReads = append(lt.staleReads, StaleRead{
+			Key:             key,
+			ExpectedVersion: vInfo.Version,
+			ActualVersion:   0, // Key doesn't exist on this node yet
+			TimeSinceWrite:  time.Since(vInfo.Timestamp).Seconds(),
+		})
+		lt.keyAccessTimes[key] = append(lt.keyAccessTimes[key], AccessInfo{
+			Timestamp: time.Now(),
+			OpType:    "read",
+		})
+		lt.mu.Unlock()
+	}
+
+	return latency, isStale
 }
 
 // GenerateWorkload generates the test workload
@@ -162,6 +190,7 @@ func (lt *LoadTester) GenerateWorkload(duration int, writeRatio float64, opsPerS
 
 	startTime := time.Now()
 	operationCount := 0
+	var wg sync.WaitGroup
 
 	// Key pool for generating locality
 	keyPool := make([]string, lt.numKeys)
@@ -183,22 +212,30 @@ func (lt *LoadTester) GenerateWorkload(duration int, writeRatio float64, opsPerS
 		// Select key
 		key := keyPool[rand.Intn(len(keyPool))]
 
-		if isWrite {
-			value := fmt.Sprintf("value_%d", time.Now().UnixNano())
-			latency, _ := lt.WriteOperation(key, value)
-			lt.mu.Lock()
-			lt.writeLatencies = append(lt.writeLatencies, latency)
-			lt.mu.Unlock()
-		} else {
-			latency, _ := lt.ReadOperation(key)
-			lt.mu.Lock()
-			lt.readLatencies = append(lt.readLatencies, latency)
-			lt.mu.Unlock()
-		}
-
 		operationCount++
+		wg.Add(1)
+
+		// Fire operation asynchronously to allow concurrency
+		go func(k string, write bool) {
+			defer wg.Done()
+
+			if write {
+				value := fmt.Sprintf("value_%d", time.Now().UnixNano())
+				latency, _ := lt.WriteOperation(k, value)
+				lt.mu.Lock()
+				lt.writeLatencies = append(lt.writeLatencies, latency)
+				lt.mu.Unlock()
+			} else {
+				latency, _ := lt.ReadOperation(k)
+				lt.mu.Lock()
+				lt.readLatencies = append(lt.readLatencies, latency)
+				lt.mu.Unlock()
+			}
+		}(key, isWrite)
 	}
 
+	fmt.Printf("Fired %d operations, waiting for completion...\n", operationCount)
+	wg.Wait()
 	fmt.Printf("Completed %d operations\n", operationCount)
 }
 
@@ -290,11 +327,11 @@ func (lt *LoadTester) SaveResults(filename string) error {
 		"stale_reads":          lt.staleReads,
 		"read_write_intervals": lt.readWriteIntervals,
 		"statistics": map[string]interface{}{
-			"total_writes":       len(lt.writeLatencies),
-			"total_reads":        len(lt.readLatencies),
-			"total_stale_reads":  len(lt.staleReads),
-			"write_avg_latency":  mean(lt.writeLatencies),
-			"read_avg_latency":   mean(lt.readLatencies),
+			"total_writes":      len(lt.writeLatencies),
+			"total_reads":       len(lt.readLatencies),
+			"total_stale_reads": len(lt.staleReads),
+			"write_avg_latency": mean(lt.writeLatencies),
+			"read_avg_latency":  mean(lt.readLatencies),
 		},
 	}
 
@@ -404,8 +441,22 @@ func min(nums ...interface{}) interface{} {
 			}
 		}
 		return minVal
+>>>>>>> 4177218 (Update leaderless)
 	}
-	return 0
+	minVal := data[0]
+	for _, v := range data {
+		if v < minVal {
+			minVal = v
+		}
+	}
+	return minVal
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func main() {
@@ -421,7 +472,15 @@ func main() {
 	// Configure URLs
 	var urls []string
 	if *mode == "leader" {
-		urls = []string{"http://localhost:8080"}
+		// For leader-follower, include leader + all followers
+		// Writes go to leader, reads distributed across all nodes
+		urls = []string{
+			"http://localhost:8080", // Leader
+			"http://localhost:8081", // Follower 1
+			"http://localhost:8082", // Follower 2
+			"http://localhost:8083", // Follower 3
+			"http://localhost:8084", // Follower 4
+		}
 	} else {
 		urls = []string{
 			"http://localhost:8081",
