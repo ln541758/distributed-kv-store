@@ -1,16 +1,58 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"strconv"
 	"strings"
 )
 
+// createStore creates a Store based on BACKEND_TYPE environment variable
+// Returns: memory store if BACKEND_TYPE=memory or not set
+//
+//	S3 store if BACKEND_TYPE=s3
+func createStore() (Store, error) {
+	backendType := os.Getenv("BACKEND_TYPE")
+	if backendType == "" {
+		backendType = "memory" // default to memory
+	}
+
+	log.Println("=== createStore() invoked ===")
+	log.Println("BACKEND_TYPE =", backendType)
+	log.Println("S3_BUCKET =", os.Getenv("S3_BUCKET"))
+	log.Println("S3_ENDPOINT =", os.Getenv("S3_ENDPOINT"))
+
+	switch backendType {
+	case "s3":
+		bucket := os.Getenv("S3_BUCKET")
+		if bucket == "" {
+			return nil, fmt.Errorf("S3_BUCKET missing when BACKEND_TYPE=s3")
+		}
+		store, err := NewS3Store(bucket)
+		if err != nil {
+			return nil, err
+		}
+		log.Printf("Using S3 backend (bucket: %s)", bucket)
+		return store, nil
+
+	case "memory":
+		fallthrough
+	default:
+		log.Printf("Using in-memory backend")
+		return NewKVStore(), nil
+	}
+}
+
 func main() {
 	nodeType := os.Getenv("NODE_TYPE") // "leader" or "follower"
 	if nodeType == "" {
 		nodeType = "follower"
+	}
+
+	store, err := createStore()
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	port := os.Getenv("PORT")
@@ -37,10 +79,10 @@ func main() {
 			followerURLs = strings.Split(urls, ",")
 		}
 
-		leader := NewLeaderNode(followerURLs, w, r)
+		leader := NewLeaderNode(store, followerURLs, w, r)
 		server = NewServer(port, leader, nil, nodeType)
 	} else {
-		follower := NewFollowerNode()
+		follower := NewFollowerNode(store)
 		server = NewServer(port, nil, follower, nodeType)
 	}
 

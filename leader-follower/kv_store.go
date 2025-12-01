@@ -15,6 +15,12 @@ type KVPair struct {
 	Version int    `json:"version"`
 }
 
+// Store interface
+type Store interface {
+	Set(key, value string, version *int) (int, error)
+	Get(key string) (KVPair, bool, error)
+}
+
 // KVStore is an in-memory key-value store
 type KVStore struct {
 	store          map[string]KVPair
@@ -31,7 +37,7 @@ func NewKVStore() *KVStore {
 }
 
 // Set stores a key-value pair with optional version
-func (kv *KVStore) Set(key, value string, version *int) int {
+func (kv *KVStore) Set(key, value string, version *int) (int, error) {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 
@@ -53,30 +59,30 @@ func (kv *KVStore) Set(key, value string, version *int) int {
 		Version: v,
 	}
 
-	return v
+	return v, nil
 }
 
 // Get retrieves a key-value pair
-func (kv *KVStore) Get(key string) (KVPair, bool) {
+func (kv *KVStore) Get(key string) (KVPair, bool, error) {
 	kv.mu.RLock()
 	defer kv.mu.RUnlock()
 
 	pair, exists := kv.store[key]
-	return pair, exists
+	return pair, exists, nil
 }
 
 // LeaderNode represents a leader in the Leader-Follower architecture
 type LeaderNode struct {
-	kvStore      *KVStore
+	store        Store
 	followerURLs []string
 	w            int // Write quorum
 	r            int // Read quorum
 }
 
 // NewLeaderNode creates a new leader node
-func NewLeaderNode(followerURLs []string, w, r int) *LeaderNode {
+func NewLeaderNode(store Store, followerURLs []string, w, r int) *LeaderNode {
 	return &LeaderNode{
-		kvStore:      NewKVStore(),
+		store:        store,
 		followerURLs: followerURLs,
 		w:            w,
 		r:            r,
@@ -90,7 +96,10 @@ func (ln *LeaderNode) Write(key, value string) (int, int, error) {
 	}
 
 	// Leader writes locally first
-	version := ln.kvStore.Set(key, value, nil)
+	version, err := ln.store.Set(key, value, nil)
+	if err != nil {
+		return 500, 0, err
+	}
 	successfulWrites := 1 // Leader itself
 
 	// W=1: Only leader needs to write
@@ -155,7 +164,10 @@ func (ln *LeaderNode) replicateToFollower(followerURL, key, value string, versio
 func (ln *LeaderNode) Read(key string) (int, string, int, error) {
 	// R=1: Only read from leader
 	if ln.r == 1 {
-		pair, exists := ln.kvStore.Get(key)
+		pair, exists, err := ln.store.Get(key)
+		if err != nil {
+			return 500, "", 0, err
+		}
 		if !exists {
 			return 404, "", 0, fmt.Errorf("key not found")
 		}
@@ -166,7 +178,7 @@ func (ln *LeaderNode) Read(key string) (int, string, int, error) {
 	results := []KVPair{}
 
 	// Read from leader
-	if pair, exists := ln.kvStore.Get(key); exists {
+	if pair, exists, err := ln.store.Get(key); err == nil && exists {
 		results = append(results, pair)
 	}
 
@@ -229,7 +241,10 @@ func (ln *LeaderNode) readFromFollower(followerURL, key string) (KVPair, error) 
 
 // LocalRead performs a local read (for testing)
 func (ln *LeaderNode) LocalRead(key string) (int, string, int, error) {
-	pair, exists := ln.kvStore.Get(key)
+	pair, exists, err := ln.store.Get(key)
+	if err != nil {
+		return 500, "", 0, err
+	}
 	if !exists {
 		return 404, "", 0, fmt.Errorf("key not found")
 	}
@@ -238,13 +253,13 @@ func (ln *LeaderNode) LocalRead(key string) (int, string, int, error) {
 
 // FollowerNode represents a follower in the Leader-Follower architecture
 type FollowerNode struct {
-	kvStore *KVStore
+	store Store
 }
 
 // NewFollowerNode creates a new follower node
-func NewFollowerNode() *FollowerNode {
+func NewFollowerNode(store Store) *FollowerNode {
 	return &FollowerNode{
-		kvStore: NewKVStore(),
+		store: store,
 	}
 }
 
@@ -253,16 +268,16 @@ func (fn *FollowerNode) Replicate(key, value string, version int) int {
 	// Simulate write delay
 	time.Sleep(100 * time.Millisecond)
 
-	fn.kvStore.Set(key, value, &version)
+	_, _ = fn.store.Set(key, value, &version)
 	return 201
 }
 
 // LocalRead performs a local read
 func (fn *FollowerNode) LocalRead(key string) (int, string, int, error) {
-	// Simulate read delay
-	time.Sleep(50 * time.Millisecond)
-
-	pair, exists := fn.kvStore.Get(key)
+	pair, exists, err := fn.store.Get(key)
+	if err != nil {
+		return 500, "", 0, err
+	}
 	if !exists {
 		return 404, "", 0, fmt.Errorf("key not found")
 	}

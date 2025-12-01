@@ -1,0 +1,37 @@
+version: "3.9"
+
+services:
+  localstack:
+    image: localstack/localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,sqs
+      - DEBUG=1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_REGION=us-east-1
+    networks:
+      - kvnet
+
+  leader:
+    build:
+      context: ../leader-follower
+      dockerfile: ../leader-follower/Dockerfile
+    environment:
+      - NODE_TYPE=leader
+      - PORT=8000
+      - W=5
+      - R=1
+      - BACKEND_TYPE=s3
+      - S3_BUCKET=kvstore-bucket
+      - S3_ENDPOINT=http://localstack:4566
+    ports:
+      - "8000:8000"
+    depends_on:
+      - localstack
+    networks:
+      - kvnet
+
+networks:
+  kvnet:

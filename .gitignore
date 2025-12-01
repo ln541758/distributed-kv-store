@@ -39,3 +39,12 @@ Thumbs.db
 # Visualizations (generated files - too large for git)
 visualizations/*.png
 
+# Terraform
+terraform_aws/.terraform.lock.hcl
+terraform_aws/.terraform/
+terraform_aws/terraform.tfvars
+terraform_aws/terraform.tfstate
+terraform_aws/terraform.tfstate.backup
+terraform_aws/terraform.tfvars.backup
+terraform_aws/terraform.tfvars.backup.backup
+terraform_aws/terraform.tfvars.backup.backup.backup

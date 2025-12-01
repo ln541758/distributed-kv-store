@@ -1,0 +1,10 @@
+# Copy this file to terraform.tfvars and fill in your existing IAM role name
+# terraform.tfvars is in .gitignore, so it won't be committed
+
+# Specify your existing IAM role name here
+# This will prevent Terraform from trying to create a new role
+existing_iam_role_name = "YOUR_EXISTING_IAM_ROLE_NAME_HERE"
+
+# Optional: If your instance profile has a different name than the role
+# existing_iam_instance_profile_name = "YOUR_INSTANCE_PROFILE_NAME_HERE"
+
